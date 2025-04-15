@@ -1,7 +1,7 @@
 FactoryBot.define do
   factory :book do
-    title { "MyString" }
-    description { "MyText" }
-    status { 1 }
+    title { 'Test Book' }
+    description { 'Book description' }
+    status { 0 }
   end
 end

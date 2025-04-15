@@ -12,7 +12,7 @@ class BooksController < ApplicationController
 
     book.update!(status: :reserved)
 
-    Reservation.create!(book: book, user_email: user_email, reserved_at: Time.current)
+    Reservation.create!(book: book, user_email: user_email)
 
     render json: { message: "Book reserved successfully" }, status: :ok
   end

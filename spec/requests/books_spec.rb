@@ -2,7 +2,7 @@
 require 'rails_helper'
 
 RSpec.describe "Book Reservations", type: :request do
-  let(:book) { Book.create!(title: "Test Book") }
+  let(:book) { create(:book) }
 
   describe "POST /books/:id/reserve" do
     it "reserves an available book" do
