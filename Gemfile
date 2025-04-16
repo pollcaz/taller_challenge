@@ -45,4 +45,7 @@ group :development, :test do
   gem "faker"
 end
 
+# Pagination
+gem 'kaminari'
+
 
