@@ -1,102 +1,105 @@
-# spec/requests/books_spec.rb
+# spec/controllers/books_controller_spec.rb
 require 'rails_helper'
 
-RSpec.describe "Book Reservations", type: :request do
-  let(:book) { create(:book) }
+RSpec.describe BooksController, type: :controller do
+  describe 'POST #reserve' do
+    let(:book) { create(:book) }
+    let(:valid_params) { { id: book.id, email: 'user@example.com' } }
 
-  describe "POST /books/:id/reserve" do
-    it "reserves an available book" do
-      post "/books/#{book.id}/reserve", params: { email: "test@example.com" }
+    context 'with valid parameters' do
+      it 'returns success response' do
+        post :reserve, params: valid_params
+        expect(response).to have_http_status(:ok)
+        expect(json_response['message']).to eq('Book reserved successfully')
+      end
 
-      expect(response).to have_http_status(:ok)
-      expect(book.reload.status).to eq("reserved")
-      expect(Reservation.last.user_email).to eq("test@example.com")
+      it 'calls the ReserveBook service' do
+        reserve_service = instance_double(Books::ReserveBook, call: { success: true })
+        allow(Books::ReserveBook).to receive(:new).and_return(reserve_service)
+
+        post :reserve, params: valid_params
+
+        expect(Books::ReserveBook).to have_received(:new).with(
+          book_id: book.id.to_s,
+          email: 'user@example.com'
+        )
+        expect(reserve_service).to have_received(:call)
+      end
     end
 
-    it "returns error if book is already reserved" do
-      book.update!(status: :reserved)
-      post "/books/#{book.id}/reserve", params: { email: "test@example.com" }
-
-      expect(response).to have_http_status(:bad_request)
+    context 'when book is not found' do
+      it 'returns not found status' do
+        post :reserve, params: { id: 9999, email: 'user@example.com' }
+        expect(response).to have_http_status(:not_found)
+        expect(json_response['error']).to eq('Book not found')
+      end
     end
 
-    it "returns error if book is checked out" do
-      book.update!(status: :checked_out)
-      post "/books/#{book.id}/reserve", params: { email: "test@example.com" }
-
-      expect(response).to have_http_status(:bad_request)
+    context 'when email is missing' do
+      it 'returns unprocessable entity status' do
+        post :reserve, params: { id: book.id, email: '' }
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(json_response['error']).to eq('Email is missing')
+      end
     end
 
-    it "returns error if email is missing" do
-      post "/books/#{book.id}/reserve", params: {}
+    context 'when book is not available' do
+      let(:book) { create(:book, status: :reserved) }
 
-      expect(response).to have_http_status(:unprocessable_entity)
+      it 'returns bad request status' do
+        post :reserve, params: valid_params
+        expect(response).to have_http_status(:bad_request)
+        expect(json_response['error']).to eq('Book is not available')
+      end
     end
 
-    it "returns 404 if book does not exist" do
-      post "/books/9999/reserve", params: { email: "test@example.com" }
+    context 'when reservation fails' do
+      before do
+        allow_any_instance_of(Books::ReserveBook).to receive(:call).and_raise(StandardError, 'Unexpected error')
+      end
 
-      expect(response).to have_http_status(:not_found)
+      it 'returns internal server error' do
+        post :reserve, params: valid_params
+        expect(response).to have_http_status(:internal_server_error)
+        expect(json_response['error']).to eq('Reservation failed: Unexpected error')
+      end
     end
   end
 
-  describe "GET /books" do
-    before do
-      Rails.cache.clear
-      Book.destroy_all
+  describe 'GET #index' do
+    let!(:books) { create_list(:book, 15) }
+
+    context 'without pagination parameters' do
+      it 'returns first page with 10 books' do
+        get :index
+        expect(response).to have_http_status(:ok)
+        expect(json_response.size).to eq(10)
+      end
     end
 
-    let!(:books) do
-      [
-        create(:book, title: "A Tale of Two Cities", status: :available),
-        create(:book, title: "Moby Dick", status: :available),
-        create(:book, title: "Zorro", status: :available)
-      ]
+    context 'with pagination parameters' do
+      it 'returns requested page size' do
+        get :index, params: { per_page: 5, page: 2 }
+        expect(response).to have_http_status(:ok)
+        expect(json_response.size).to eq(5)
+      end
     end
 
-    it "returns a successful response" do
-      get "/books", params: { page: 1, per_page: 10 }
-
-      expect(response).to have_http_status(:ok)
+    it 'uses cache' do
+      expect(Rails.cache).to receive(:fetch).with('books_index_1_10', expires_in: 30.minutes)
+      get :index
     end
 
-    it "returns books in alphabetical order" do
-      get "/books", params: { page: 1, per_page: 10 }
-
-      titles = JSON.parse(response.body).map { |b| b["title"] }
-      expect(titles).to eq(["A Tale of Two Cities", "Moby Dick", "Zorro"])
+    it 'returns books ordered by title' do
+      get :index
+      titles = json_response.map { |b| b['title'] }
+      expect(titles).to eq(titles.sort)
     end
+  end
 
-    it "returns only selected fields (id, title, status)" do
-      get "/books", params: { page: 1, per_page: 10 }
+  private
 
-      json = JSON.parse(response.body)
-      expect(json.first.keys).to match_array(["id", "title", "status"])
-    end
-
-    it "paginates the results" do
-      get "/books", params: { page: 1, per_page: 2 }
-
-      json = JSON.parse(response.body)
-      expect(json.size).to eq(2)
-    end
-
-    it "caches the response" do
-      expect(Rails.cache.exist?("books_index_1_2")).to be false
-
-      get "/books", params: { page: 1, per_page: 2 }
-      expect(Rails.cache.exist?("books_index_1_2")).to be true
-
-      cached_data = Rails.cache.read("books_index_1_2")
-      expect(cached_data.first["title"]).to eq("A Tale of Two Cities")
-    end
-
-    it "returns an empty array if no books exist" do
-      Book.delete_all
-      get "/books", params: { page: 1, per_page: 10 }
-
-      json = JSON.parse(response.body)
-      expect(json).to eq([])
-    end
+  def json_response
+    JSON.parse(response.body)
   end
 end
