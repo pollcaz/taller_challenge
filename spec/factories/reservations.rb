@@ -1,6 +1,6 @@
 FactoryBot.define do
   factory :reservation do
-    user_email { "reservation@example.com" }
-    book { nil }
+    user_email { "user@example.com" }
+    association :book
   end
 end
